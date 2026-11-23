@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Grabar sobre video</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#f5f5f7;--fg:#111;--card:#fff;--ac:#d9480f;--mu:#666;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111;--fg:#f2f2f2;--card:#1d1d1f;--mu:#999}}
+:root[data-theme="dark"]{--bg:#111;--fg:#f2f2f2;--card:#1d1d1f;--mu:#999}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,system-ui,sans-serif;padding:16px;max-width:520px;margin-inline:auto}
+h1{font-size:22px;margin:4px 0 12px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
+.box{height:62vh;aspect-ratio:9/16;max-width:100%;margin:8px auto;border-radius:10px;background:#000;display:block;object-fit:cover}
+#cv{touch-action:none}
+button{width:100%;padding:14px;border:0;border-radius:12px;font-size:16px;font-weight:600;background:var(--ac);color:#fff;margin-top:8px}
+button.sec{background:var(--bg);color:var(--fg);border:1px solid var(--mu)}
+button:disabled{opacity:.5}
+select{width:100%;padding:10px;border-radius:10px;font-size:16px;margin-top:6px}
+p,label{color:var(--mu);font-size:14px;margin:6px 0}
+.step{font-weight:700}
+</style>
+</head>
+<body>
+<h1>🎬 Grabar sobre video</h1>
+
+<div class="card">
+<div class="step" id="stepTxt">Paso 1: elige el video o la imagen de fondo</div>
+<button id="pickBtn">Elegir video o imagen</button>
+<input type="file" id="file" accept="video/*,image/*" style="display:none">
+<div id="work" style="display:none">
+<video id="live" playsinline muted autoplay style="display:none"></video>
+<canvas id="cv" class="box"></canvas>
+<p>Diseño (puedes cambiarlo mientras grabas):</p>
+<select id="lay">
+<option value="pip">Frontal en recuadro (se mueve y cambia de tamaño)</option>
+<option value="top">Frontal arriba y fondo abajo</option>
+<option value="bottom">Frontal abajo y fondo arriba</option>
+</select>
+<label id="sndRow"><input type="checkbox" id="snd"> Incluir el sonido del video de fondo (usa audífonos)</label>
+<button id="recBtn">● Iniciar grabación</button>
+</div>
+<p id="status"></p>
+</div>
+
+<div class="card" id="outCard" style="display:none">
+<div class="step">Video final (9:16)</div>
+<video id="out" class="box" playsinline controls></video>
+<button id="shareBtn">Guardar en Fototeca</button>
+<p>En el menú elige "Guardar video". Si no abre, mantén presionado el video.</p>
+</div>
+
+<button class="sec" id="resetBtn">Empezar de nuevo</button>
+
+<script>
+const $=id=>document.getElementById(id);
+const W=720,H=1280;
+let stream=null,rec=null,bgEl=null,isVideo=false,loopOn=false,outBlob=null,outExt="mp4";
+const inset={x:W-300-24,y:60,w:300,h:Math.round(300*16/9)};
+const mime=()=>{for(const m of ["video/mp4","video/webm;codecs=vp8,opus","video/webm"]){if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m}return ""};
+function cover(ctx,v,x,y,w,h){
+  const vw=v.videoWidth||v.naturalWidth,vh=v.videoHeight||v.naturalHeight;
+  if(!vw)return;
+  const r=Math.max(w/vw,h/vh),sw=w/r,sh=h/r;
+  ctx.drawImage(v,(vw-sw)/2,(vh-sh)/2,sw,sh,x,y,w,h);
+}
+$("pickBtn").onclick=()=>$("file").click();
+$("file").onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    $("status").textContent="Cargando...";
+    isVideo=f.type.startsWith("video");
+    const url=URL.createObjectURL(f);
+    if(isVideo){
+      bgEl=document.createElement("video");bgEl.src=url;bgEl.playsInline=true;bgEl.muted=true;
+      await new Promise((ok,no)=>{bgEl.onloadeddata=ok;bgEl.onerror=no;bgEl.load()});
+      bgEl.currentTime=0.05;
+    }else{
+      bgEl=new Image();bgEl.src=url;
+      await new Promise((ok,no)=>{bgEl.onload=ok;bgEl.onerror=no});
+      $("sndRow").style.display="none";
+    }
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:1080},height:{ideal:1920}},audio:true});
+    $("live").srcObject=stream;
+    $("pickBtn").style.display="none";$("work").style.display="block";
+    $("stepTxt").textContent="Paso 2: graba tu parte con la cámara frontal";
+    $("status").textContent="Arrastra el recuadro con el dedo; pellizca para cambiar su tamaño.";
+    startLoop();
+  }catch(err){
+    $("status").textContent="No se pudo cargar el archivo o abrir la cámara. Revisa permisos o abre el enlace directo en Safari.";
+  }
+};
+function startLoop(){
+  const cv=$("cv");cv.width=W;cv.height=H;
+  const ctx=cv.getContext("2d");loopOn=true;
+  (function draw(){
+    ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
+    const lay=$("lay").value,live=$("live");
+    if(lay==="pip"){
+      cover(ctx,bgEl,0,0,W,H);
+      cover(ctx,live,inset.x,inset.y,inset.w,inset.h);
+      ctx.strokeStyle="#fff";ctx.lineWidth=4;ctx.strokeRect(inset.x,inset.y,inset.w,inset.h);
+    }else if(lay==="top"){
+      cover(ctx,live,0,0,W,H/2);cover(ctx,bgEl,0,H/2,W,H/2);
+    }else{
+      cover(ctx,bgEl,0,0,W,H/2);cover(ctx,live,0,H/2,W,H/2);
+    }
+    if(loopOn)requestAnimationFrame(draw);
+  })();
+}
+(function(){
+  const cv=$("cv"),pts=new Map();let pd=0;
+  const toC=e=>{const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}};
+  const inside=p=>$("lay").value==="pip"&&p.x>=inset.x&&p.x<=inset.x+inset.w&&p.y>=inset.y&&p.y<=inset.y+inset.h;
+  const dist=()=>{const a=[...pts.values()];return a.length<2?0:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)};
+  const clamp=()=>{
+    inset.w=Math.max(160,Math.min(W,inset.w));inset.h=Math.round(inset.w*16/9);
+    inset.x=Math.max(0,Math.min(W-inset.w,inset.x));inset.y=Math.max(0,Math.min(H-inset.h,inset.y));
+  };
+  cv.addEventListener("pointerdown",e=>{
+    const p=toC(e);
+    if(inside(p)||pts.size>0){pts.set(e.pointerId,p);cv.setPointerCapture(e.pointerId);pd=dist();}
+  });
+  cv.addEventListener("pointermove",e=>{
+    if(!pts.has(e.pointerId))return;
+    const p=toC(e),o=pts.get(e.pointerId);
+    pts.set(e.pointerId,p);
+    if(pts.size===1){inset.x+=p.x-o.x;inset.y+=p.y-o.y;}
+    else{
+      const d=dist();
+      if(pd>0){const cx=inset.x+inset.w/2,cy=inset.y+inset.h/2;inset.w*=d/pd;inset.h=inset.w*16/9;inset.x=cx-inset.w/2;inset.y=cy-inset.h/2;}
+      pd=d;
+    }
+    clamp();
+  });
+  const up=e=>{pts.delete(e.pointerId);pd=dist();};
+  cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
+})();
+$("recBtn").onclick=async()=>{
+  if(rec&&rec.state==="recording"){rec.stop();return}
+  const cs=$("cv").captureStream(30);
+  let at=stream.getAudioTracks();
+  if(isVideo&&$("snd").checked){
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext,ac=new AC(),dest=ac.createMediaStreamDestination();
+      ac.createMediaStreamSource(new MediaStream(at)).connect(dest);
+      bgEl.muted=false;
+      const s=ac.createMediaElementSource(bgEl);s.connect(dest);s.connect(ac.destination);
+      await ac.resume();
+      at=dest.stream.getAudioTracks();
+    }catch(e){}
+  }
+  at.forEach(t=>cs.addTrack(t));
+  const parts=[],m=mime();
+  rec=new MediaRecorder(cs,m?{mimeType:m}:undefined);
+  rec.ondataavailable=e=>{if(e.data.size)parts.push(e.data)};
+  rec.onstop=()=>{
+    loopOn=false;if(isVideo)bgEl.pause();
+    stream.getTracks().forEach(t=>t.stop());stream=null;
+    outBlob=new Blob(parts,{type:rec.mimeType||"video/mp4"});
+    outExt=(rec.mimeType||"").includes("webm")?"webm":"mp4";
+    $("out").src=URL.createObjectURL(outBlob);
+    $("outCard").style.display="block";
+    $("work").style.display="none";
+    $("stepTxt").textContent="Listo: tu video final";
+    $("status").textContent="";
+  };
+  rec.start();
+  if(isVideo){bgEl.currentTime=0;bgEl.play().catch(()=>{});}
+  $("recBtn").textContent="■ Detener";
+  $("status").textContent="Grabando... mueve el recuadro con el dedo.";
+};
+$("shareBtn").onclick=async()=>{
+  if(!outBlob)return;
+  const f=new File([outBlob],"video."+outExt,{type:outBlob.type});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f]});
+    else $("status").textContent="Mantén presionado el video final para guardarlo.";
+  }catch(e){}
+};
+$("resetBtn").onclick=()=>location.reload();
+</script>
+</body>
+</html>
