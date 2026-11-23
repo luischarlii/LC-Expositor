@@ -29,7 +29,7 @@ p,label{color:var(--mu);font-size:14px;margin:6px 0}
 <button id="pickBtn">Elegir video o imagen</button>
 <input type="file" id="file" accept="video/*,image/*" style="display:none">
 <div id="work" style="display:none">
-<video id="live" playsinline muted autoplay style="display:none"></video>
+<video id="live" playsinline muted autoplay style="position:fixed;left:0;top:0;width:4px;height:4px;opacity:0.02;pointer-events:none"></video>
 <canvas id="cv" class="box"></canvas>
 <p>Diseño (puedes cambiarlo mientras grabas):</p>
 <select id="lay">
@@ -96,6 +96,7 @@ $("file").onchange=async e=>{
     }
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:1080},height:{ideal:1920}},audio:true});
     $("live").srcObject=stream;
+    await $("live").play().catch(()=>{});
     $("pickBtn").style.display="none";$("work").style.display="block";
     setupSize();
     $("stepTxt").textContent="Paso 2: graba tu cara hablando sobre el video";
@@ -110,6 +111,7 @@ function startLoop(){
   (function draw(){
     ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
     const lay=$("lay").value,live=$("live");
+    if(live.paused)live.play().catch(()=>{});
     if(lay==="pip"){
       cover(ctx,bgEl,0,0,W,H);
       cover(ctx,live,inset.x,inset.y,inset.w,inset.h);
